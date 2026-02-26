@@ -94,6 +94,7 @@ class LangchainRAG:
         self.llm: Optional[ChatGoogleGenerativeAI] = None
         self._ready = False
         self._init_error: Optional[str] = None
+        self._init_stage: str = "starting"  # Track initialization progress
         threading.Thread(target=self._init, daemon=True).start()
 
     def _init(self):
@@ -101,6 +102,7 @@ class LangchainRAG:
             os.makedirs(os.path.dirname(FAISS_PATH) if os.path.dirname(FAISS_PATH) else ".", exist_ok=True)
 
             # ── Step 1: Local embeddings (no API key needed) ────────
+            self._init_stage = "downloading_embeddings"
             print("  🔧  RAG: loading local embedding model (first time ~30s, then instant)...")
             self.embeddings = HuggingFaceEmbeddings(
                 model_name="all-MiniLM-L6-v2",
@@ -109,6 +111,7 @@ class LangchainRAG:
             )
 
             # ── Step 2: FAISS vector store ──────────────────────────
+            self._init_stage = "loading_vectors"
             faiss_file = FAISS_PATH + ".faiss"
             if os.path.exists(faiss_file):
                 # Load saved index from disk (instant)
@@ -136,6 +139,7 @@ class LangchainRAG:
                 print("  💾  RAG: FAISS index saved to disk!")
 
             # ── Step 3: Gemini LLM ──────────────────────────────────
+            self._init_stage = "loading_llm"
             api_key = os.getenv("GOOGLE_API_KEY", "")
             if api_key and api_key != "your_key_here":
                 self.llm = ChatGoogleGenerativeAI(
@@ -148,12 +152,16 @@ class LangchainRAG:
             else:
                 print("  ✅  RAG ready! (FAISS + all-MiniLM-L6-v2 — add GOOGLE_API_KEY for Gemini)")
 
+            self._init_stage = "ready"
             self._ready = True
 
         except Exception as e:
             error_msg = str(e)
+            import traceback
+            traceback.print_exc()
             print(f"  ⚠️  RAG init error: {error_msg}")
-            self._init_error = error_msg
+            self._init_error = f"{error_msg}\n{traceback.format_exc()}"
+            self._init_stage = "error"
 
     def _build_live_context(self, live: Dict) -> str:
         cities = live.get("cities", {})
@@ -179,28 +187,39 @@ class LangchainRAG:
         )
 
     async def query_stream(self, question: str, live: Dict) -> AsyncGenerator[str, None]:
-        # Wait up to 120 seconds for RAG to initialize (Render cold start: model download ~2-3 min)
+        # Wait up to 180 seconds for RAG to initialize (Render cold start: model download ~3-5 min)
         import time
         start_time = time.time()
-        timeout = 120  # 2 minutes - needed for Render cold start
-        check_interval = 1.0  # Check every second
+        timeout = 180  # 3 minutes - Render free tier is slow
+        check_interval = 1.0
         
-        elapsed = 0
+        last_progress = -10
         while not self._ready and elapsed < timeout:
-            if self._init_error:
-                yield f"❌ RAG initialization failed: {self._init_error}\n"
-                return
-            # Show progress every 10 seconds
-            if int(elapsed) % 10 == 0 and int(elapsed) > 0:
-                yield f"⏳ RAG initializing... ({int(elapsed)}s elapsed, embedding model downloading)\n"
-            await asyncio.sleep(check_interval)
             elapsed = time.time() - start_time
+            
+            if self._init_error:
+                yield f"❌ RAG initialization failed: {self._init_error[:200]}...\n"
+                return
+            
+            # Show progress every 5 seconds
+            if int(elapsed) - last_progress >= 5:
+                stage_msg = {
+                    "starting": "Initializing...",
+                    "downloading_embeddings": "Downloading embedding model (22MB)...",
+                    "loading_vectors": "Loading vector database...",
+                    "loading_llm": "Loading language model..."
+                }.get(self._init_stage, f"Working... ({self._init_stage})")
+                
+                yield f"⏳ {stage_msg} ({int(elapsed)}s elapsed)\n"
+                last_progress = int(elapsed)
+            
+            await asyncio.sleep(check_interval)
         
         if not self._ready:
             if self._init_error:
-                yield f"❌ RAG initialization failed: {self._init_error}\n"
+                yield f"❌ RAG initialization failed: {self._init_error[:200]}...\n"
             else:
-                yield f"⏳ RAG initialization timed out after {timeout}s. The embedding model (22MB) is still downloading on Render. Please wait 2-3 minutes then try again.\n"
+                yield f"⏳ RAG initialization timed out after {timeout}s. Please check backend logs.\n"
             return
 
         # Vector similarity search
