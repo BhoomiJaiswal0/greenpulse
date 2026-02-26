@@ -1,2 +1,13 @@
 fastapi
 uvicorn
+httpx
+pandas
+pydantic
+langchain
+langchain-community
+langchain-core
+langchain-huggingface
+langchain-google-genai
+faiss-cpu
+python-dotenv
+dotenv
