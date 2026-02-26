@@ -179,22 +179,28 @@ class LangchainRAG:
         )
 
     async def query_stream(self, question: str, live: Dict) -> AsyncGenerator[str, None]:
-        # Wait up to 30 seconds for RAG to initialize (Render cold start can be slow)
+        # Wait up to 120 seconds for RAG to initialize (Render cold start: model download ~2-3 min)
         import time
         start_time = time.time()
-        timeout = 30
+        timeout = 120  # 2 minutes - needed for Render cold start
+        check_interval = 1.0  # Check every second
         
-        while not self._ready and time.time() - start_time < timeout:
+        elapsed = 0
+        while not self._ready and elapsed < timeout:
             if self._init_error:
                 yield f"❌ RAG initialization failed: {self._init_error}\n"
                 return
-            await asyncio.sleep(0.5)
+            # Show progress every 10 seconds
+            if int(elapsed) % 10 == 0 and int(elapsed) > 0:
+                yield f"⏳ RAG initializing... ({int(elapsed)}s elapsed, embedding model downloading)\n"
+            await asyncio.sleep(check_interval)
+            elapsed = time.time() - start_time
         
         if not self._ready:
             if self._init_error:
                 yield f"❌ RAG initialization failed: {self._init_error}\n"
             else:
-                yield "⏳ RAG initialization timed out. The embedding model may still be downloading. Please try again in 30-60 seconds.\n"
+                yield f"⏳ RAG initialization timed out after {timeout}s. The embedding model (22MB) is still downloading on Render. Please wait 2-3 minutes then try again.\n"
             return
 
         # Vector similarity search
