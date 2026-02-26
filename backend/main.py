@@ -173,6 +173,7 @@ def rag_status():
     return {
         "loaded": _rag is not None,
         "ready": getattr(_rag, "_ready", False) if _rag else False,
+        "error": getattr(_rag, "_init_error", None) if _rag else None,
     }
 
 

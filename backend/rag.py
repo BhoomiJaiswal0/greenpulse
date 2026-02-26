@@ -93,6 +93,7 @@ class LangchainRAG:
         self.embeddings: Optional[HuggingFaceEmbeddings] = None
         self.llm: Optional[ChatGoogleGenerativeAI] = None
         self._ready = False
+        self._init_error: Optional[str] = None
         threading.Thread(target=self._init, daemon=True).start()
 
     def _init(self):
@@ -150,7 +151,9 @@ class LangchainRAG:
             self._ready = True
 
         except Exception as e:
-            print(f"  ⚠️  RAG init error: {e}")
+            error_msg = str(e)
+            print(f"  ⚠️  RAG init error: {error_msg}")
+            self._init_error = error_msg
 
     def _build_live_context(self, live: Dict) -> str:
         cities = live.get("cities", {})
@@ -176,8 +179,22 @@ class LangchainRAG:
         )
 
     async def query_stream(self, question: str, live: Dict) -> AsyncGenerator[str, None]:
+        # Wait up to 30 seconds for RAG to initialize (Render cold start can be slow)
+        import time
+        start_time = time.time()
+        timeout = 30
+        
+        while not self._ready and time.time() - start_time < timeout:
+            if self._init_error:
+                yield f"❌ RAG initialization failed: {self._init_error}\n"
+                return
+            await asyncio.sleep(0.5)
+        
         if not self._ready:
-            yield "⏳ RAG is still initializing, please try again in a moment...\n"
+            if self._init_error:
+                yield f"❌ RAG initialization failed: {self._init_error}\n"
+            else:
+                yield "⏳ RAG initialization timed out. The embedding model may still be downloading. Please try again in 30-60 seconds.\n"
             return
 
         # Vector similarity search
