@@ -714,11 +714,9 @@ footer strong {
 // GreenPulse Frontend JavaScript
 // ═══════════════════════════════════════════════════════════════
 
-// Always talk to the FastAPI backend on port 8000
-const BACKEND_PORT = 8000;
-const API_BASE = `${window.location.protocol}//${window.location.hostname}:${BACKEND_PORT}`;
-const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const WS_URL = `${WS_PROTOCOL}//${window.location.hostname}:${BACKEND_PORT}/ws/stream`;
+// Backend URL - change this for different deployments
+const API_BASE = 'https://greenpulse-fsur.onrender.com';
+const WS_URL = 'wss://greenpulse-fsur.onrender.com/ws/stream';
 
 // State
 let liveData = null;
